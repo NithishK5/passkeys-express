@@ -13,7 +13,8 @@ class PassportService {
     // 3. passport deserialise user
     passport.deserializeUser(this.deserialiseUserFn);
   }
-  useWebAuthnStrategy(store) {
+
+  useWebauthnStrategy(store) {
     return new WebAuthnStrategy({ store: store }, this.verify, this.register);
   }
 
@@ -31,17 +32,19 @@ class PassportService {
     });
   }
 
+  // Verify callback
   async verify(id, userHandle, done) {
     const transaction = await db.transaction();
     try {
-      const currentCredentials = await models.PublicKeyCredential.findOne(
+      const currentCredentials = await models.PublicKeyCredentials.findOne(
         {
           where: { external_id: id },
         },
         { transaction }
       );
+
       if (currentCredentials === null) {
-        return done(null, false), { message: "Invalid key," };
+        return done(null, false, { message: "Invalid key. " });
       }
 
       const currentUser = await models.User.findOne(
@@ -50,19 +53,25 @@ class PassportService {
         },
         { transaction }
       );
+
       if (currentUser === null) {
-        return done(null, false), { message: "Invalid user," };
+        return done(null, false, { message: "No such user. " });
       }
-      if (Buffer.compare(currentUser.user_handle, userHandle) !== 0) {
-        return done(null, false), { message: "Handles do not match," };
+
+      if (Buffer.compare(currentUser.handle, userHandle) != 0) {
+        return done(null, false, { message: "Handles do not match. " });
       }
+
       await transaction.commit();
+
       return done(null, currentCredentials, currentCredentials.public_key);
     } catch (error) {
       await transaction.rollback();
       throw error;
     }
   }
+
+  // Register callback
   async register(user, id, publicKey, done) {
     const transaction = await db.transaction();
     try {
