@@ -6,11 +6,31 @@ const models = require("../models");
 
 class PassportService {
   init(store) {
-    passport.use(this.useWebAuthnStrategy(store));
+    // 1. configure passport to use WebAuthn Strategy
+    passport.use(this.useWebauthnStrategy(store));
+    // 2. passport serialise user
+    passport.serializeUser(this.serialiseUserFn);
+    // 3. passport deserialise user
+    passport.deserializeUser(this.deserialiseUserFn);
   }
   useWebAuthnStrategy(store) {
     return new WebAuthnStrategy({ store: store }, this.verify, this.register);
   }
+
+  // Serialise user to token
+  serialiseUserFn(user, done) {
+    process.nextTick(() => {
+      done(null, { id: user.id, email: user.email });
+    });
+  }
+
+  // Deserialise user from token
+  deserialiseUserFn(user, done) {
+    process.nextTick(() => {
+      return done(null, user);
+    });
+  }
+
   async verify(id, userHandle, done) {
     const transaction = await db.transaction();
     try {
@@ -38,6 +58,42 @@ class PassportService {
       }
       await transaction.commit();
       return done(null, currentCredentials, currentCredentials.public_key);
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+  }
+  async register(user, id, publicKey, done) {
+    const transaction = await db.transaction();
+    try {
+      const newUser = await models.User.create(
+        {
+          email: user.name,
+          handle: user.id,
+        },
+        { transaction }
+      );
+
+      if (newUser === null) {
+        return done(null, false, { message: "Could not create user. " });
+      }
+
+      const newCredentials = await models.PublicKeyCredentials.create(
+        {
+          user_id: newUser.id,
+          external_id: id,
+          public_key: publicKey,
+        },
+        { transaction }
+      );
+
+      if (newCredentials === null) {
+        return done(null, false, { message: "Could not create public key. " });
+      }
+
+      await transaction.commit();
+
+      return done(null, newUser);
     } catch (error) {
       await transaction.rollback();
       throw error;
